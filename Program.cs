@@ -16,7 +16,7 @@ namespace TaskTrayScreenChanger
         [STAThread]
         static void Main()
         {
-            const string appName = "screenConfigTray";
+            const string appName = "Multi-Screen Profile Switcher";
             bool createdNew;
 
             var mutex = new Mutex(true, appName, out createdNew);

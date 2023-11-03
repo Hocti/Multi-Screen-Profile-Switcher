@@ -79,7 +79,8 @@ namespace TaskTrayApplication
             return $"{name};{x};{y};{width};{height};{rotate};{hz}";
         }
 
-        public screenState fromString(string s) {
+        public static screenState fromString(string s)
+        {
             string[] arr = s.Split(';');
             return new screenState { name = arr[0], x = int.Parse(arr[1]), y = int.Parse(arr[2]), width = int.Parse(arr[3]), height = int.Parse(arr[4]), rotate = int.Parse(arr[5]), hz = int.Parse(arr[6]) };
         }
@@ -99,14 +100,31 @@ namespace TaskTrayApplication
             string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd,
             DisplaySettingsFlags dwflags, IntPtr lParam);
 
-        public static string toString(screenState[] states)
+        public static string ScreenStateArrayToString(screenState[] states)
         {
-            string s="";
+            string s = "";
+            int i = 0;
             foreach (screenState ss in states)
             {
-                s+= ss.ToString();
+                if (i++ > 0)
+                {
+                    s += "|";
+                }
+                s += ss.ToString();
             }
             return s;
+        }
+        public static screenState[] ScreenStateArrayfromString( string s )
+        {
+            string[] arr = s.Split('|');
+            screenState[] result= new screenState[arr.Length];
+            int i = 0;
+            foreach (string ss in arr)
+            {
+                result[i]=screenState.fromString(ss);
+                i++;
+            }
+            return result;
         }
 
         public static screenState[] getScreenState()

@@ -6,9 +6,6 @@ using System.Windows.Forms;
 using TaskTrayScreenChanger.Properties;
 using System.Diagnostics;
 using TaskTrayApplication;
-//using System.Collections;
-//using System.Text.Json;
-//using System.Text.Json.Serialization;
 using Newtonsoft.Json;
 using Microsoft.Win32;
 
@@ -18,30 +15,26 @@ namespace TaskTrayScreenChanger
 
     public class TaskTrayApplicationContext : ApplicationContext
     {
-        NotifyIcon notifyIcon = new NotifyIcon();
-        MenuItem loadMenuItem = new MenuItem("Load");
-        MenuItem removeMenuItem = new MenuItem("Remove");
-
-        Dictionary<string, screenState[]> ssss = new Dictionary<string, screenState[]>();
-        Dictionary<string, string> ssss_json = new Dictionary<string, string>();
-
+        
+        private static readonly string StartupKey = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+        private static readonly string StartupValue = "MultiScreenProfileSwitcher";
 
         readonly string exePath = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-        readonly string jsonPath = "config.json";
+        readonly string configFilename = "config.json";
 
-        public static void screenStateDictToJsonFile(Dictionary<string, screenState[]> data,string filePath)
+        NotifyIcon notifyIcon = new NotifyIcon();
+        MenuItem loadMenuItem = new MenuItem("Load Profiles");
+        MenuItem removeMenuItem = new MenuItem("Remove Profiles");
+
+        Dictionary<string, screenState[]> screenStatesDict = new Dictionary<string, screenState[]>();
+
+        public static void saveToFile(Dictionary<string, screenState[]> data,string filePath)
         {
-            //var options = new JsonSerializerOptions { WriteIndented = true, IncludeFields = true }; // For pretty printing
-            //var jsonString= JsonSerializer.Serialize(data, options);
             var jsonString = JsonConvert.SerializeObject(data);
             File.WriteAllText(filePath, jsonString);
         }
-        public static string screenStateToJson(screenState[] data)
-        {
-            return JsonConvert.SerializeObject(data);
-        }
 
-        public static Dictionary<string, screenState[]> ReadFromJsonFile(string filePath)
+        public static Dictionary<string, screenState[]> loadFile(string filePath)
         {
             if (File.Exists(filePath))
             {
@@ -52,19 +45,18 @@ namespace TaskTrayScreenChanger
         }
 
 
-        private static readonly string StartupKey = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
-        private static readonly string StartupValue = "screenConfigTray";
 
 
         public TaskTrayApplicationContext()
         {
-            MenuItem saveMenuItem = new MenuItem("Save", new EventHandler(ShowSaveConfig));
+            //some buttons
+            MenuItem saveMenuItem = new MenuItem("Save Current Profile", new EventHandler(ShowSaveConfig));
             MenuItem exitMenuItem = new MenuItem("Exit", new EventHandler(Exit));
-            MenuItem settingMenuItem = new MenuItem("Setting", new EventHandler((sender, e) => { Process.Start("ms-settings:display"); }));
+            MenuItem settingMenuItem = new MenuItem("Display Setting", new EventHandler((sender, e) => { Process.Start("ms-settings:display"); }));
 
-
+            //screen setting button
             RegistryKey key = Registry.CurrentUser.OpenSubKey(StartupKey, true);
-            MenuItem startupItem = new MenuItem("open on startup", new EventHandler((sender, e) => {
+            MenuItem startupItem = new MenuItem("Auto Open at Startup", new EventHandler((sender, e) => {
                 if (key.GetValue(StartupValue) == null)
                 {
                     key.SetValue(StartupValue, Application.ExecutablePath.ToString());
@@ -82,33 +74,29 @@ namespace TaskTrayScreenChanger
                 startupItem.Checked = true;
             }
 
+            //icon
             notifyIcon.Icon = Resources.AppIcon;
             notifyIcon.DoubleClick += new EventHandler(LoadDefault);
             notifyIcon.ContextMenu = new ContextMenu(new MenuItem[] {  loadMenuItem, saveMenuItem , removeMenuItem, settingMenuItem, startupItem, exitMenuItem });
             notifyIcon.Visible = true;
 
+            //default screen profile
+            screenStatesDict["default"] = SetScreen.getScreenState();
 
-            Dictionary<string, screenState[]> ssss2 = ReadFromJsonFile(System.IO.Path.Combine(exePath, jsonPath));
-            if (ssss2!=null)
+            //load config
+            Dictionary<string, screenState[]> screenStatesDict2 = loadFile(System.IO.Path.Combine(exePath, configFilename));
+            if (screenStatesDict2!=null)
             {
-                foreach (KeyValuePair<string, screenState[]> entry in ssss2)
+                foreach (KeyValuePair<string, screenState[]> entry in screenStatesDict2)
                 {
                     if (entry.Key != "default")
                     {
-                        ssss[entry.Key] = entry.Value;
-                        ssss_json[entry.Key] = screenStateToJson(entry.Value);
+                        screenStatesDict[entry.Key] = entry.Value;
                     }
                 }
             }
 
-            ssss["default"] = SetScreen.getScreenState();
-            ssss_json["default"] = screenStateToJson(ssss["default"]);
-            Debug.WriteLine(exePath);
-            Debug.WriteLine(ssss_json["default"]);
-
             renewLoad();
-
-
         }
 
         void renewLoad()
@@ -116,13 +104,39 @@ namespace TaskTrayScreenChanger
             loadMenuItem.MenuItems.Clear();
             removeMenuItem.MenuItems.Clear();
 
-            int count = 0;
-            foreach (KeyValuePair<string, screenState[]> entry in ssss)
+
+            string currentStr = SetScreen.ScreenStateArrayToString(SetScreen.getScreenState());
+            string currUsing="default";
+            foreach (KeyValuePair<string, screenState[]> entry in screenStatesDict)
             {
+                if (entry.Key== "default")
+                {
+                    continue;
+                }
+
+                if (SetScreen.ScreenStateArrayToString(screenStatesDict["default"]) == SetScreen.ScreenStateArrayToString(screenStatesDict[entry.Key]))
+                {
+                    currUsing = entry.Key;
+                    break;
+                }
+            }
+
+            int count = 0;
+            foreach (KeyValuePair<string, screenState[]> entry in screenStatesDict)
+            {
+                if(entry.Key == "default" && currUsing != "default")
+                {
+                    continue;
+                }
 
                 MenuItem m = new MenuItem($"Load: {entry.Key}", new EventHandler(clickLoadConfig));
                 m.Tag = entry.Key;
                 loadMenuItem.MenuItems.Add(m);
+
+                if (SetScreen.ScreenStateArrayToString(screenStatesDict[entry.Key]) == currentStr)
+                {
+                    m.Checked = true;
+                }
 
                 if (entry.Key != "default")
                 {
@@ -140,6 +154,7 @@ namespace TaskTrayScreenChanger
 
             Debug.WriteLine($"count {count}");
         }
+
         void LoadDefault(object sender, EventArgs e)
         {
             LoadConfig("default");
@@ -147,7 +162,9 @@ namespace TaskTrayScreenChanger
 
         void LoadConfig(string config_key)
         {
-            int result=SetScreen.setScreenState(ssss[config_key]);
+            int result=SetScreen.setScreenState(screenStatesDict[config_key]);
+
+            renewLoad();
             Debug.WriteLine($"LoadConfig: {config_key} {result}");
         }
 
@@ -159,10 +176,10 @@ namespace TaskTrayScreenChanger
         void clickRemoveConfig(object sender, EventArgs e)
         {
             string remove_id = (string)(((MenuItem)sender).Tag);
-            if (ssss.ContainsKey(remove_id))
+            if (screenStatesDict.ContainsKey(remove_id))
             {   
                 Debug.WriteLine($"remove: {remove_id}");
-                ssss.Remove(remove_id);
+                screenStatesDict.Remove(remove_id);
                 renewLoad();
             }
         }
@@ -170,27 +187,26 @@ namespace TaskTrayScreenChanger
         void ShowSaveConfig(object sender, EventArgs e)
         {
             var ss=SetScreen.getScreenState();
-            string ss_str = screenStateToJson(ss);
+            string ss_str = SetScreen.ScreenStateArrayToString(ss);
 
-            foreach (KeyValuePair<string, string> entry in ssss_json)
+
+            foreach (KeyValuePair<string, screenState[]> entry in screenStatesDict)
             {
-                if(entry.Value==ss_str && entry.Key!="default")
+                if (SetScreen.ScreenStateArrayToString(screenStatesDict[entry.Key]) == ss_str && entry.Key!="default")
                 {
-                    MessageBox.Show($"same as {entry.Key}");
+                    MessageBox.Show($"Current Profile is same as {entry.Key}");
                     Debug.WriteLine(ss_str);
                     return;
                 }
             }
 
             string value = "";
-            if (InputBox("Input name:", "", ref value) == DialogResult.OK)
+            if (InputBox("Input Profile Name:", "", ref value) == DialogResult.OK)
             {
                 Debug.WriteLine($"value: {value}");
-                ssss[value] = ss;
-                ssss_json[value] = ss_str;
+                screenStatesDict[value] = ss;
 
-
-                screenStateDictToJsonFile(ssss, System.IO.Path.Combine(exePath, jsonPath));
+                saveToFile(screenStatesDict, System.IO.Path.Combine(exePath, configFilename));
 
                 renewLoad();
             }
